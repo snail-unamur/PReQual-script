@@ -12,7 +12,7 @@ import (
 
 type GhClient struct{}
 
-const data = "number,title,baseRefOid,headRefOid,state,createdAt,closedAt,comments,body,closingIssuesReferences"
+const data = "number,title,baseRefOid,headRefOid,state,createdAt,closedAt,comments,body,closingIssuesReferences,reviews"
 
 func (c *GhClient) GetPullRequests(repo string) ([]model.PullRequest, error) {
 	limits := helper.GenerateLimits(10000)

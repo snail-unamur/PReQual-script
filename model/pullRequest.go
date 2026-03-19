@@ -10,4 +10,5 @@ type PullRequest struct {
 	ClosedAt   string    `json:"closedAt"`
 	State      string    `json:"state"`
 	Comments   []Comment `json:"comments"`
+	Reviews    []Review  `json:"reviews"`
 }
