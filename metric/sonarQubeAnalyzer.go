@@ -16,109 +16,134 @@ import (
 
 type SonarQubeAnalyzer struct{}
 
-func (a *SonarQubeAnalyzer) AnalyzeProject(repoName string, path string, metrics []string) error {
-	files := []string{"base.zip", "head.zip"}
+func (a *SonarQubeAnalyzer) AnalyzeProjectBranch(
+	branchType string,
+	prID string,
+	repoName string,
+	basePath string,
+	metrics []string,
+) (map[string]interface{}, error) {
 
-	var compiler compilation.Compiler
-	compiler = &compilation.JavaCompiler{}
+	archivePath := filepath.Join(basePath, branchType+".zip")
+	defer cleanupExtractedDir(archivePath)
 
-	for _, zipName := range files {
-		zipPath := filepath.Join(path, zipName)
-		if _, err := os.Stat(zipPath); err != nil {
-			return fmt.Errorf("zip not found: %s", zipPath)
-		}
+	compiler := compilation.Compiler(&compilation.JavaCompiler{})
 
-		targetDir := filepath.Join(path, zipName[:len(zipName)-4])
-
-		defer func() {
-			if err := os.RemoveAll(targetDir); err != nil {
-				fmt.Printf("Warning: could not remove %s: %v\n", targetDir, err)
-			}
-		}()
-
-		if err := helper.Unzip(zipPath, targetDir); err != nil {
-			return err
-		}
-
-		projectRoot, err := helper.FindProjectRoot(targetDir)
-		if err != nil {
-			return err
-		}
-
-		if err := compiler.CompileProject(projectRoot); err != nil {
-			fmt.Printf("Warning: could not compile %s: %v\n", projectRoot, err)
-			return err
-		}
-
-		projectName := repoName + "-" + filepath.Base(path) + "-" + zipName[:len(zipName)-4]
-
-		if err := compiler.SetSonarProperties(projectRoot, projectName); err != nil {
-			return err
-		}
-
-		if err := runSonarScanner(projectRoot); err != nil {
-			return err
-		}
-
-		if err := waitForAnalysisCompletion(projectName, metrics, 5*time.Minute); err != nil {
-			return err
-		}
-
-		var data model.SonarMeasures
-
-		data, err = retrieveSonarMetrics(projectName, metrics)
-		if err != nil {
-			return err
-		}
-
-		filePath := filepath.Join(path, zipName[:len(zipName)-4]+"_metrics.json")
-		helper.WriteSonarMeasuresJSON(filePath, data)
-
-	}
-
-	return nil
+	return analyzeArchive(
+		branchType,
+		archivePath,
+		prID,
+		repoName,
+		metrics,
+		compiler,
+	)
 }
 
-func waitForAnalysisCompletion(projectName string, metrics []string, timeout time.Duration) error {
-	sonarURL := os.Getenv("SONAR_URL")
-	sonarToken := os.Getenv("SONAR_TOKEN")
-	client := helper.NewHTTPClient(sonarURL, sonarToken)
+func analyzeArchive(
+	branchType string,
+	archivePath string,
+	prID string,
+	repoName string,
+	metrics []string,
+	compiler compilation.Compiler,
+) (map[string]interface{}, error) {
+
+	if _, err := os.Stat(archivePath); err != nil {
+		return nil, fmt.Errorf("archive not found: %s", archivePath)
+	}
+
+	extractDir := strings.TrimSuffix(archivePath, ".zip")
+	if err := helper.Unzip(archivePath, extractDir); err != nil {
+		return nil, err
+	}
+
+	projectRoot, err := helper.FindProjectRoot(extractDir)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := compiler.CompileProject(projectRoot); err != nil {
+		return nil, fmt.Errorf("compile failed: %w", err)
+	}
+
+	projectKey := buildProjectKey(repoName, prID, branchType)
+
+	if err := compiler.SetSonarProperties(projectRoot, projectKey); err != nil {
+		return nil, err
+	}
+
+	if err := runSonarScanner(projectRoot); err != nil {
+		return nil, err
+	}
+
+	if err := waitForAnalysisCompletion(projectKey, metrics, 5*time.Minute); err != nil {
+		return nil, err
+	}
+
+	measures, err := retrieveSonarMetrics(projectKey, metrics)
+	if err != nil {
+		return nil, err
+	}
+
+	return helper.ConvertMeasuresToMap(measures), nil
+}
+
+func buildProjectKey(repoName, prID, branchType string) string {
+	repo := strings.ReplaceAll(repoName, "/", "-")
+	return fmt.Sprintf("%s-%s-%s", prID, repo, branchType)
+}
+
+func cleanupExtractedDir(archivePath string) {
+	dir := strings.TrimSuffix(archivePath, ".zip")
+	_ = os.RemoveAll(dir)
+}
+
+func waitForAnalysisCompletion(
+	projectKey string,
+	metrics []string,
+	timeout time.Duration,
+) error {
+
+	client := helper.NewHTTPClient(
+		os.Getenv("SONAR_URL"),
+		os.Getenv("SONAR_TOKEN"),
+	)
 
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			path := fmt.Sprintf("/api/measures/component?metricKeys=%s&component=%s", strings.Join(metrics, ","), projectName)
+	for range ticker.C {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("sonar analysis timeout after %v", timeout)
+		}
 
-			var resp model.SonarMeasures
-			err := client.DoRequest("GET", path, nil, &resp)
+		var resp model.SonarMeasures
+		path := fmt.Sprintf(
+			"/api/measures/component?metricKeys=%s&component=%s",
+			strings.Join(metrics, ","),
+			projectKey,
+		)
 
-			if err == nil && len(resp.Component.Measures) == len(metrics) {
+		if err := client.DoRequest("GET", path, nil, &resp); err == nil {
+			if len(resp.Component.Measures) == len(metrics) {
 				return nil
 			}
-
-			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout after %v waiting for analysis completion", timeout)
-			}
-
-		case <-time.After(timeout):
-			return fmt.Errorf("timeout waiting for analysis completion")
 		}
 	}
+
+	return nil
 }
 
-func runSonarScanner(path string) error {
-	absPath, err := filepath.Abs(path)
+func runSonarScanner(projectPath string) error {
+	absPath, err := filepath.Abs(projectPath)
 	if err != nil {
 		return err
 	}
 
 	cmd := exec.Command(
 		"docker", "run", "--rm",
-		"--network", "prequal-sonar-net",
+		"--network", os.Getenv("DOCKER_NET"),
 		"-v", absPath+":/usr/src",
 		"-e", "SONAR_TOKEN="+os.Getenv("SONAR_TOKEN"),
 		"sonarsource/sonar-scanner-cli",
@@ -129,20 +154,23 @@ func runSonarScanner(path string) error {
 	return cmd.Run()
 }
 
-func retrieveSonarMetrics(projectName string, metrics []string) (model.SonarMeasures, error) {
-	sonarURL := os.Getenv("SONAR_URL")
-	sonarToken := os.Getenv("SONAR_TOKEN")
+func retrieveSonarMetrics(
+	projectKey string,
+	metrics []string,
+) (model.SonarMeasures, error) {
 
-	client := helper.NewHTTPClient(sonarURL, sonarToken)
+	client := helper.NewHTTPClient(
+		os.Getenv("SONAR_URL"),
+		os.Getenv("SONAR_TOKEN"),
+	)
 
 	path := fmt.Sprintf(
 		"/api/measures/component?metricKeys=%s&component=%s",
 		strings.Join(metrics, ","),
-		projectName,
+		projectKey,
 	)
 
 	var resp model.SonarMeasures
-
 	if err := client.DoRequest("GET", path, nil, &resp); err != nil {
 		return model.SonarMeasures{}, err
 	}

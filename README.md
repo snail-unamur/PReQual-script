@@ -14,7 +14,7 @@ The docker container will be launch automatically by the script during the analy
 ### 2 - Setup a Docker network
 
 ```bash
-docker network create prequal-sonar-net
+docker network create prequal-net
 ```
 
 ### 3 - SonarQube
@@ -38,16 +38,29 @@ Once SonarQube is running, a global access token must be set:
 - Create a new token by selecting `Global Analysis Token`. 
 - Copy the newly created token, and paste it in the .env file of the analyzer root folder (a `.env.example` is available for reference).
 
+### 5 - Setup MongoDB
+```bash
+# Pulling the docker image
+docker pull mongodb
+
+# Run the image
+docker run -d --name mongodb -p 27017:27017 --network=prequal-net mongodb:latest
+```
+
+### 6 - Setup .env file
+
+Use the `.env.example` to setup the parameter to run the script
+
 ## Run the script locally
 
 To run the analyzer script:
 
 ```bash
-go run main.go -repo organization/repository 
+go run main.go -repos organization/repository 
 ```
 
 Two arguments can be passed: 
-- `-repo organization/repository`, to precise on which GitHub repository the analysis will be run.
+- `-repos organization/repository(,organization/repository)*`, to precise on which GitHub repositorys the analysis will be run.
   - `organization` is the GitHub organization name
   - `repository` is the GitHub repository name
 - [Option] `-workspace my-workspace`, to precise the workspace folder for the analysis, the default workspace is `./tmp` in the root script folder.
@@ -64,25 +77,3 @@ The SonarQube analysis can be customized by passing flags to the script.
 - Duplicated lines -> `duplicated_lines`
 - Number of lines of code -> `ncloc`
 - Software quality maintainability rating -> `software_quality_maintainability_rating`
-
-
-## Run the script on distant server (Currently unavailable)
-
-### 1 - Build the docker image
-
-```bash
-docker build -t prequal .
-```
-
-### 2 - Run the image
-
-```bash
-docker run --rm --name PReQual --network=sonar-net --env-file .env -v $(pwd)/analysis:/workspace -v /var/run/docker.sock:/var/run/docker.sock prequal -repo organization/repository
-```
-
-Two arguments can be passed:
-- `-repo organization/repository`, to precise on which GitHub repository the analysis will be run.
-    - `organization` is the GitHub organization name
-    - `repository` is the GitHub repository name
-
-For this method, a GitHub CLI token must be provided in the `.env` file.

@@ -47,9 +47,9 @@ sonar.projectName=%s
 sonar.sources=.
 sonar.sourceEncoding=UTF-8
 %s
-sonar.host.url=http://prequal-sonarqube:9000
+sonar.host.url=%s
 sonar.login=${SONAR_TOKEN}
-`, projectName, projectName, binaries)
+`, projectName, projectName, binaries, os.Getenv("SONAR_DOCKER_URL"))
 
 	propPath := filepath.Join(path, "sonar-project.properties")
 	return os.WriteFile(propPath, []byte(content), 0644)

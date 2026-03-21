@@ -12,7 +12,8 @@ import (
 
 type GhClient struct{}
 
-const data = "number,title,baseRefOid,headRefOid,state,createdAt,closedAt,comments,body,closingIssuesReferences,reviews"
+// TODO: ajouter le closing ref issue
+const data = "id,number,title,author,baseRefOid,headRefOid,state,createdAt,closedAt,comments,body,closingIssuesReferences,reviews"
 
 func (c *GhClient) GetPullRequests(repo string) ([]model.PullRequest, error) {
 	limits := helper.GenerateLimits(10000)

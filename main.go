@@ -1,94 +1,115 @@
 package main
 
 import (
+	"PReQual/client"
+	"PReQual/database"
+	"PReQual/helper"
+	"PReQual/metric"
+	"PReQual/model"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"time"
-
-	"PReQual/client"
-	"PReQual/helper"
-	"PReQual/metric"
 )
 
-const defaultWorkspace = "tmp"
-const defaultMetric = "complexity,cognitive_complexity"
-
-var repos = []string{
-	"ReViSE-EuroSpaceCenter/ReViSE-backend",
-	"sipeed/picoclaw",
-	"iluwatar/java-design-patterns",
-	"TheAlgorithms/Java",
-	"google/guava",
-	"dbeaver/dbeaver",
-	"apache/dubbo",
-	"netty/netty",
-	"keycloak/keycloak",
-}
+const (
+	defaultWorkspace = "tmp"
+	defaultMetrics   = "complexity,cognitive_complexity"
+)
 
 func main() {
-	// CLI flags
-	reposArg := flag.String("repos", "", "GitHub repositories in the form <owner>/<repo>(,<owner>/<repo>)* (required)")
-	workspace := flag.String("workspace", defaultWorkspace, "Workspace directory (default: tmp)")
-	metricsArg := flag.String("metrics", defaultMetric, "Comma-separated list of metrics to analyze (default: complexity,cognitive_complexity)")
+	reposArg := flag.String("repos", "", "owner/repo,owner/repo (required)")
+	workspace := flag.String("workspace", defaultWorkspace, "Workspace directory")
+	metricsArg := flag.String("metrics", defaultMetrics, "Comma-separated metrics")
 
 	flag.Parse()
 
 	if *reposArg == "" {
-		fmt.Println("Error: -repos argument is required")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	repos := strings.Split(*reposArg, ",")
+	database.InitMongoDB(os.Getenv("MONGODB_URL"))
 
+	repos := strings.Split(*reposArg, ",")
 	metrics := strings.Split(*metricsArg, ",")
 
-	var prClient client.PullRequestClient
-	prClient = &client.GhClient{}
+	prClient := client.PullRequestClient(&client.GhClient{})
+	analyzer := metric.ProjectAnalyser(&metric.SonarQubeAnalyzer{})
 
-	var analyzer metric.ProjectAnalyser
-	analyzer = &metric.SonarQubeAnalyzer{}
-
-	for _, repo := range repos {
-		fmt.Printf("\n===== Traitement du repo: %s =====\n", repo)
-
-		prs, err := prClient.GetPullRequests(repo)
-		if err != nil {
-			fmt.Printf("Error fetching pull requests: %v\n", err)
+	for _, repoKey := range repos {
+		if err := processRepo(repoKey, *workspace, metrics, prClient, analyzer); err != nil {
+			fmt.Printf("Error: %v\n", err)
 			return
 		}
+	}
+}
 
-		for _, pr := range prs {
-			var startTime = time.Now()
-			fmt.Printf("PR #%d: %s (Base: %s, Head: %s)\n", pr.Number, pr.Title, pr.BaseRefOid, pr.HeadRefOid)
+func processRepo(
+	repoKey string,
+	workspace string,
+	metrics []string,
+	prClient client.PullRequestClient,
+	analyzer metric.ProjectAnalyser,
+) error {
 
-			var path = fmt.Sprintf("%s/%s/pr_%d", *workspace, repo, pr.Number)
+	fmt.Printf("\n===== Repo: %s =====\n", repoKey)
 
-			if err := prClient.RetrieveBranchZip(repo, pr.HeadRefOid, path, "head.zip"); err != nil {
-				return
-			}
-			if err = prClient.RetrieveBranchZip(repo, pr.BaseRefOid, path, "base.zip"); err != nil {
-				return
-			}
+	parts := strings.Split(repoKey, "/")
+	org, repo := parts[0], parts[1]
 
-			helper.WriteMetaDataFile(path, pr)
+	prs, err := prClient.GetPullRequests(repoKey)
+	if err != nil {
+		return err
+	}
 
-			formattedRepo := strings.Replace(repo, "/", "-", -1)
-
-			err := analyzer.AnalyzeProject(formattedRepo, path, metrics)
-			var totalDuration = helper.FormatDuration(time.Since(startTime))
-			var totalSize = helper.FormatSizeRounded([]string{path + "/head.zip", path + "/base.zip"})
-			var baseSize = helper.FormatSizeRounded([]string{path + "/base.zip"})
-			var headSize = helper.FormatSizeRounded([]string{path + "/head.zip"})
-			fmt.Printf("End of the PR #%d's analysis.\n", pr.Number)
-			fmt.Printf("Total ZIP files size : %s (base.zip: %s ; head.zip %s).\n", totalSize, baseSize, headSize)
-			fmt.Printf("Total duration of the PR's analysis : %s.\n", totalDuration)
-			if err != nil {
-				fmt.Printf("Error analyzing pull requests: %v\n", err)
-				return
-			}
+	for _, pr := range prs {
+		if err := processPR(repoKey, org, repo, pr, workspace, metrics, prClient, analyzer); err != nil {
+			return err
 		}
 	}
+
+	return nil
+}
+
+func processPR(
+	repoKey, org, repo string,
+	pr model.PullRequest,
+	workspace string,
+	metrics []string,
+	prClient client.PullRequestClient,
+	analyzer metric.ProjectAnalyser,
+) error {
+
+	fmt.Printf("PR #%d: %s\n", pr.Number, pr.Title)
+
+	path := fmt.Sprintf("%s/%s/pr_%d", workspace, repoKey, pr.Number)
+	start := time.Now()
+
+	if err := prClient.RetrieveBranchZip(repoKey, pr.HeadRefOid, path, "head.zip"); err != nil {
+		return err
+	}
+	if err := prClient.RetrieveBranchZip(repoKey, pr.BaseRefOid, path, "base.zip"); err != nil {
+		return err
+	}
+
+	baseMetrics, err := analyzer.AnalyzeProjectBranch("base", pr.Id, repoKey, path, metrics)
+	if err != nil {
+		return err
+	}
+
+	headMetrics, err := analyzer.AnalyzeProjectBranch("head", pr.Id, repoKey, path, metrics)
+	if err != nil {
+		return err
+	}
+
+	stats := model.AnalysisStat{
+		TotalTime: helper.FormatDuration(time.Since(start)),
+		BaseSize:  helper.FormatSizeRounded([]string{path + "/base.zip"}),
+		HeadSize:  helper.FormatSizeRounded([]string{path + "/head.zip"}),
+	}
+
+	database.InsertPR(org, repo, pr, headMetrics, baseMetrics, stats)
+	return nil
 }

@@ -1,12 +1,14 @@
 package model
 
 type PullRequest struct {
+	Id         string    `json:"id"`
 	Number     int       `json:"number"`
 	Title      string    `json:"title"`
+	Author     Author    `json:"author"`
 	Body       string    `json:"body"`
 	BaseRefOid string    `json:"baseRefOid"`
 	HeadRefOid string    `json:"headRefOid"`
-	CreateAt   string    `json:"createdAt"`
+	CreatedAt  string    `json:"createdAt"`
 	ClosedAt   string    `json:"closedAt"`
 	State      string    `json:"state"`
 	Comments   []Comment `json:"comments"`

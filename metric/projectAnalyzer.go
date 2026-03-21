@@ -1,5 +1,11 @@
 package metric
 
 type ProjectAnalyser interface {
-	AnalyzeProject(projectName string, path string, metrics []string) error
+	AnalyzeProjectBranch(
+		branchType string,
+		prID string,
+		repoName string,
+		basePath string,
+		metrics []string,
+	) (map[string]interface{}, error)
 }
