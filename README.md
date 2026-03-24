@@ -41,10 +41,10 @@ Once SonarQube is running, a global access token must be set:
 ### 5 - Setup MongoDB
 ```bash
 # Pulling the docker image
-docker pull mongodb
+docker pull mongo:latest
 
 # Run the image
-docker run -d --name mongodb -p 27017:27017 --network=prequal-net mongodb:latest
+docker run -d --name mongo -p 27017:27017 --network=prequal-net mongo:latest
 ```
 
 ### 6 - Setup .env file
