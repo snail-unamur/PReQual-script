@@ -76,7 +76,7 @@ func analyzeArchive(
 		return nil, err
 	}
 
-	if err := waitForAnalysisCompletion(projectKey, metrics, 5*time.Minute); err != nil {
+	if err := waitForAnalysisCompletion(projectKey, metrics, 60*time.Minute); err != nil {
 		return nil, err
 	}
 
