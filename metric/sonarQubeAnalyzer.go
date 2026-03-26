@@ -105,7 +105,7 @@ func waitForAnalysisCompletion(
 ) error {
 
 	client := helper.NewHTTPClient(
-		os.Getenv("SONAR_URL"),
+		os.Getenv("SONAR_DOCKER_URL"),
 		os.Getenv("SONAR_TOKEN"),
 	)
 
@@ -126,7 +126,6 @@ func waitForAnalysisCompletion(
 		)
 
 		if err := client.DoRequest("GET", path, nil, &resp); err == nil {
-			fmt.Sprintf("Waiting again %d metric(s) from Sonar Analysis...", len(metrics)-len(resp.Component.Measures))
 			if len(resp.Component.Measures) == len(metrics) {
 				return nil
 			}
@@ -161,7 +160,7 @@ func retrieveSonarMetrics(
 ) (model.SonarMeasures, error) {
 
 	client := helper.NewHTTPClient(
-		os.Getenv("SONAR_URL"),
+		os.Getenv("SONAR_DOCKER_URL"),
 		os.Getenv("SONAR_TOKEN"),
 	)
 
