@@ -35,7 +35,7 @@ func main() {
 	repos := strings.Split(*reposArg, ",")
 	metrics := strings.Split(*metricsArg, ",")
 
-	prClient := client.PullRequestClient(&client.GhClient{})
+	prClient := client.PullRequestClient(client.NewGhClient())
 	analyzer := metric.ProjectAnalyser(&metric.SonarQubeAnalyzer{})
 
 	for _, repoKey := range repos {

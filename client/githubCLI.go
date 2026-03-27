@@ -6,11 +6,30 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
-type GhClient struct{}
+type GhClient struct {
+	Tokens  []string
+	Current int
+}
+
+func NewGhClient() *GhClient {
+	tokens := strings.Split(os.Getenv("GH_TOKENS"), ",")
+	return &GhClient{
+		Tokens:  tokens,
+		Current: 0,
+	}
+}
+
+func (c *GhClient) switchToken() {
+	fmt.Printf("Switching token: %s -> ", c.Tokens[c.Current])
+	c.Current = (c.Current + 1) % len(c.Tokens)
+	os.Setenv("GH_TOKEN", c.Tokens[c.Current])
+}
 
 // TODO: ajouter le closing ref issue
 const data = "id,number,title,author,baseRefOid,headRefOid,state,createdAt,closedAt,comments,body,closingIssuesReferences,reviews"
@@ -18,25 +37,27 @@ const data = "id,number,title,author,baseRefOid,headRefOid,state,createdAt,close
 func (c *GhClient) GetPullRequests(repo string) ([]model.PullRequest, error) {
 	limits := helper.GenerateLimits(10000)
 
-	var previousLimit int
-	for i, limit := range limits {
+	for tokenIndex := 0; tokenIndex < len(c.Tokens); tokenIndex++ {
+		var previousLimit int
+		for i, limit := range limits {
 
-		if i == 0 || limit != previousLimit {
-			fmt.Printf("Changement de limite détecté : nouvelle limite = %d\n", limit)
-			previousLimit = limit
-		}
+			if i == 0 || limit != previousLimit {
+				fmt.Printf("Changement de limite détecté : nouvelle limite = %d\n", limit)
+				previousLimit = limit
+			}
 
-		prs, err := c.fetchPullRequests(repo, limit)
-		if err == nil {
-			return prs, nil
-		}
+			prs, err := c.fetchPullRequests(repo, limit)
+			if err == nil {
+				return prs, nil
+			}
 
-		if handled := c.waitIfRateLimited(); handled {
-			continue
+			if handled := c.waitIfRateLimited(); handled {
+				continue
+			}
 		}
+		c.switchToken()
 	}
-
-	return nil, fmt.Errorf("impossible de récupérer les pull requests après plusieurs tentatives")
+	return nil, fmt.Errorf("impossible de récupérer les pull requests après avoir essayé tous les tokens et toutes les limites")
 }
 
 func (c *GhClient) GetRateLimit() (*model.RateLimitResponse, error) {
@@ -60,16 +81,19 @@ func (c *GhClient) RetrieveBranchZip(repo, sha, outputPath, outputName string) e
 		"--header", "Accept: application/vnd.github+json",
 	}
 
-	output, err := c.runGh(args)
-	if err != nil {
-		return fmt.Errorf("download zip for %s@%s: %w", repo, sha, err)
+	maxAttempts := len(c.Tokens)
+	for attempts := 0; attempts < maxAttempts; attempts++ {
+		output, err := c.runGh(args)
+		if err == nil {
+			if err := helper.SaveToFile(outputPath, outputName, output); err != nil {
+				return fmt.Errorf("save zip to %s: %w", outputPath, err)
+			}
+			return nil
+		}
+		fmt.Printf("error gh with token %s: %s\n", c.Tokens[c.Current], err)
+		c.switchToken()
 	}
-
-	if err := helper.SaveToFile(outputPath, outputName, output); err != nil {
-		return fmt.Errorf("save zip to %s: %w", outputPath, err)
-	}
-
-	return nil
+	return fmt.Errorf("fail with all tokens %s@%s", repo, sha)
 }
 
 func (c *GhClient) fetchPullRequests(repo string, limit int) ([]model.PullRequest, error) {

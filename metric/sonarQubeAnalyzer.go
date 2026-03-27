@@ -27,7 +27,7 @@ func (a *SonarQubeAnalyzer) AnalyzeProjectBranch(
 	archivePath := filepath.Join(basePath, branchType+".zip")
 	defer cleanupExtractedDir(archivePath)
 
-	compiler := compilation.Compiler(&compilation.JavaCompiler{})
+	compiler := compilation.Compiler(&compilation.PythonCompiler{})
 
 	return analyzeArchive(
 		branchType,
