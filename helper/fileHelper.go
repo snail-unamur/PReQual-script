@@ -2,6 +2,7 @@ package helper
 
 import (
 	"archive/zip"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -104,4 +105,11 @@ func getFileSize(path string) int64 {
 		return 0
 	}
 	return info.Size()
+}
+
+func IsPRDirExist(path string) bool {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	return true
 }

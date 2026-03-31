@@ -85,6 +85,12 @@ func processPR(
 	fmt.Printf("PR #%d: %s\n", pr.Number, pr.Title)
 
 	path := fmt.Sprintf("%s/%s/pr_%d", workspace, repoKey, pr.Number)
+
+	if helper.IsPRDirExist(path) && pr.State != "OPEN" {
+		fmt.Printf("PR #%d skipped. This PR was already analyzed.\n", pr.Number)
+		return nil
+	}
+
 	start := time.Now()
 
 	if err := prClient.RetrieveBranchZip(repoKey, pr.HeadRefOid, path, "head.zip"); err != nil {
