@@ -90,6 +90,7 @@ func analyzeArchive(
 
 func buildProjectKey(repoName, prID, branchType string) string {
 	repo := strings.ReplaceAll(repoName, "/", "-")
+	repo = strings.ReplaceAll(repo, "=", "-")
 	return fmt.Sprintf("%s-%s-%s", prID, repo, branchType)
 }
 
