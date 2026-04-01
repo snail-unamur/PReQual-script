@@ -22,6 +22,7 @@ func main() {
 	reposArg := flag.String("repos", "", "owner/repo,owner/repo (required)")
 	workspace := flag.String("workspace", defaultWorkspace, "Workspace directory")
 	metricsArg := flag.String("metrics", defaultMetrics, "Comma-separated metrics")
+	rangeArg := flag.String("range", "", "PR range to analyze, e.g., 0,100")
 
 	flag.Parse()
 
@@ -34,12 +35,17 @@ func main() {
 
 	repos := strings.Split(*reposArg, ",")
 	metrics := strings.Split(*metricsArg, ",")
+	prRange, err := helper.ParseRange(*rangeArg)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
 
 	prClient := client.PullRequestClient(client.NewGhClient())
 	analyzer := metric.ProjectAnalyser(&metric.SonarQubeAnalyzer{})
 
 	for _, repoKey := range repos {
-		if err := processRepo(repoKey, *workspace, metrics, prClient, analyzer); err != nil {
+		if err := processRepo(repoKey, *workspace, metrics, prClient, analyzer, prRange); err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
 		}
@@ -52,6 +58,7 @@ func processRepo(
 	metrics []string,
 	prClient client.PullRequestClient,
 	analyzer metric.ProjectAnalyser,
+	prRange [2]int,
 ) error {
 
 	fmt.Printf("\n===== Repo: %s =====\n", repoKey)
@@ -65,6 +72,10 @@ func processRepo(
 	}
 
 	for _, pr := range prs {
+		if !helper.IsInRange(pr.Number, prRange) {
+			fmt.Printf("PR #%d skipped. This PR is outside the specified range.\n", pr.Number)
+			continue
+		}
 		if err := processPR(repoKey, org, repo, pr, workspace, metrics, prClient, analyzer); err != nil {
 			return err
 		}

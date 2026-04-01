@@ -65,7 +65,7 @@ Two arguments can be passed:
   - `repository` is the GitHub repository name
 - [Option] `-workspace my-workspace`, to precise the workspace folder for the analysis, the default workspace is `./tmp` in the root script folder.
 - [Option] `-metrics flag1,flag2,...`, to precise which SonarQube flags should be included in the analysis, the default is `Cognitive complexity` and `Cyclomatic complexity`. The available flags are listed in the next section, the extended list of flags can be found on SonarQube's official documentation.
-
+- [Option] `-range 0,100`, to precise the range of PRs to analyze, the default is all PRs in the repository.
 
 ### Sonar Flags
 
