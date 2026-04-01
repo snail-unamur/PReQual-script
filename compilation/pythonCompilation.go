@@ -23,9 +23,6 @@ sonar.sourceEncoding=UTF-8
 sonar.python.version=3.10
 sonar.exclusions=**/venv/**,**/__pycache__/**
 sonar.host.url=%s
-sonar.login=${SONAR_TOKEN}
-
-
 `, projectName, projectName, os.Getenv("SONAR_DOCKER_URL"))
 
 	propPath := filepath.Join(path, "sonar-project.properties")
