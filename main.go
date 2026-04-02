@@ -104,19 +104,22 @@ func processPR(
 
 	start := time.Now()
 
-	if err := prClient.RetrieveBranchZip(repoKey, pr.HeadRefOid, path, "head.zip"); err != nil {
+	headFileName := fmt.Sprintf("head_%s.zip", pr.HeadRefOid)
+	if err := prClient.RetrieveBranchZip(repoKey, pr.HeadRefOid, path, headFileName); err != nil {
 		return err
 	}
-	if err := prClient.RetrieveBranchZip(repoKey, pr.BaseRefOid, path, "base.zip"); err != nil {
+	baseFileName := fmt.Sprintf("base_%s.zip", pr.BaseRefOid)
+	if err := prClient.RetrieveBranchZip(repoKey, pr.BaseRefOid, path, baseFileName); err != nil {
 		return err
 	}
 
-	baseMetrics, err := analyzer.AnalyzeProjectBranch("base", pr.Id, repoKey, path, metrics)
+	archivePath := fmt.Sprintf("%s/%s", path, headFileName)
+	headMetrics, err := analyzer.AnalyzeProjectBranch("head", pr.Id, repoKey, archivePath, metrics)
 	if err != nil {
 		return err
 	}
-
-	headMetrics, err := analyzer.AnalyzeProjectBranch("head", pr.Id, repoKey, path, metrics)
+	archivePath = fmt.Sprintf("%s/%s", path, baseFileName)
+	baseMetrics, err := analyzer.AnalyzeProjectBranch("base", pr.Id, repoKey, archivePath, metrics)
 	if err != nil {
 		return err
 	}

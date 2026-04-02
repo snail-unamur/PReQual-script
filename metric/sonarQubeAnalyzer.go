@@ -20,11 +20,10 @@ func (a *SonarQubeAnalyzer) AnalyzeProjectBranch(
 	branchType string,
 	prID string,
 	repoName string,
-	basePath string,
+	archivePath string,
 	metrics []string,
 ) (map[string]interface{}, error) {
 
-	archivePath := filepath.Join(basePath, branchType+".zip")
 	defer cleanupExtractedDir(archivePath)
 
 	compiler := compilation.Compiler(&compilation.PythonCompiler{})

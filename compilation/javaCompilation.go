@@ -48,7 +48,6 @@ sonar.sources=.
 sonar.sourceEncoding=UTF-8
 %s
 sonar.host.url=%s
-sonar.login=${SONAR_TOKEN}
 `, projectName, projectName, binaries, os.Getenv("SONAR_DOCKER_URL"))
 
 	propPath := filepath.Join(path, "sonar-project.properties")

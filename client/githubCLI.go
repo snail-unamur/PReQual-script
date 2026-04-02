@@ -31,8 +31,7 @@ func (c *GhClient) switchToken() {
 	os.Setenv("GH_TOKEN", c.Tokens[c.Current])
 }
 
-// TODO: ajouter le closing ref issue
-const data = "id,number,title,author,baseRefOid,headRefOid,state,createdAt,closedAt,comments,body,closingIssuesReferences,reviews"
+const data = "id,number,title,author,baseRefOid,headRefOid,state,createdAt,closedAt,comments,body,closingIssuesReferences,reviews,mergedAt,reviewDecision,additions,deletions,changedFiles"
 
 func (c *GhClient) GetPullRequests(repo string) ([]model.PullRequest, error) {
 	limits := helper.GenerateLimits(10000)
