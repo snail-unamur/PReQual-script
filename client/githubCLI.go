@@ -31,7 +31,7 @@ func (c *GhClient) switchToken() {
 	os.Setenv("GH_TOKEN", c.Tokens[c.Current])
 }
 
-const data = "id,number,title,author,baseRefOid,headRefOid,state,createdAt,closedAt,comments,body,closingIssuesReferences,reviews,mergedAt,reviewDecision,additions,deletions,changedFiles"
+const data = "id,number,title,author,baseRefOid,headRefOid,state,createdAt,closedAt,mergedAt,comments,body,reviews"
 
 func (c *GhClient) GetPullRequests(repo string) ([]model.PullRequest, error) {
 	limits := helper.GenerateLimits(10000)
