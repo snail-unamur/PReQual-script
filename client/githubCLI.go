@@ -17,8 +17,23 @@ type GhClient struct {
 	Current int
 }
 
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func formatCursor(cursor string) string {
+	if cursor == "" {
+		return "null"
+	}
+	return fmt.Sprintf(`"%s"`, cursor)
+}
+
 func NewGhClient() *GhClient {
 	tokens := strings.Split(os.Getenv("GH_TOKENS"), ",")
+	os.Setenv("GH_TOKEN", tokens[0])
 	return &GhClient{
 		Tokens:  tokens,
 		Current: 0,
@@ -30,33 +45,116 @@ func (c *GhClient) switchToken() {
 	c.Current = (c.Current + 1) % len(c.Tokens)
 	os.Setenv("GH_TOKEN", c.Tokens[c.Current])
 }
-
-const data = "id,number,title,author,baseRefOid,headRefOid,state,createdAt,closedAt,mergedAt,comments,body,reviews"
-
 func (c *GhClient) GetPullRequests(repo string) ([]model.PullRequest, error) {
-	limits := helper.GenerateLimits(10000)
+	owner, name, err := helper.SplitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
 
-	for tokenIndex := 0; tokenIndex < len(c.Tokens); tokenIndex++ {
-		var previousLimit int
-		for i, limit := range limits {
+	var prs []model.PullRequest
+	cursor := ""
 
-			if i == 0 || limit != previousLimit {
-				fmt.Printf("Changement de limite détecté : nouvelle limite = %d\n", limit)
-				previousLimit = limit
-			}
-
-			prs, err := c.fetchPullRequests(repo, limit)
-			if err == nil {
-				return prs, nil
-			}
-
-			if handled := c.waitIfRateLimited(); handled {
+	for {
+		resp, err := c.fetchPullRequestPage(owner, name, cursor)
+		if err != nil {
+			if c.waitIfRateLimited() {
 				continue
 			}
+			c.switchToken()
+			continue
 		}
-		c.switchToken()
+
+		prs = append(prs, mapPRNodes(resp)...)
+
+		if !resp.Data.Repository.PullRequests.PageInfo.HasNextPage {
+			break
+		}
+
+		cursor = resp.Data.Repository.PullRequests.PageInfo.EndCursor
 	}
-	return nil, fmt.Errorf("impossible de récupérer les pull requests après avoir essayé tous les tokens et toutes les limites")
+
+	return prs, nil
+}
+
+func (c *GhClient) fetchPullRequestPage(owner, name, cursor string) (*model.PullRequestResponse, error) {
+	query := buildPRQuery(owner, name, cursor)
+
+	output, err := c.runGh([]string{
+		"api", "graphql",
+		"-f", "query=" + query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp model.PullRequestResponse
+	if err := json.Unmarshal(output, &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+func buildPRQuery(owner, name, cursor string) string {
+	return fmt.Sprintf(`
+	{
+	  repository(owner: "%s", name: "%s") {
+	    pullRequests(first: 100, after: %s, states: [OPEN, CLOSED, MERGED]) {
+	      nodes {
+	        id
+	        number
+	        title
+	        body
+	        state
+	        createdAt
+	        closedAt
+	        mergedAt
+	        additions
+	        deletions
+	        changedFiles
+	        baseRefOid
+	        headRefOid
+	        author { login }
+	        comments(first: 100) {
+	          nodes { body createdAt author { login } }
+	        }
+	        reviews(first: 100) {
+	          nodes { body state author { login } }
+	        }
+	      }
+	      pageInfo { hasNextPage endCursor }
+	    }
+	  }
+	}`, owner, name, formatCursor(cursor))
+}
+
+func mapPRNodes(resp *model.PullRequestResponse) []model.PullRequest {
+	var prs []model.PullRequest
+
+	for _, n := range resp.Data.Repository.PullRequests.Nodes {
+		prs = append(prs, model.PullRequest{
+			Id:           n.ID,
+			Number:       n.Number,
+			Title:        n.Title,
+			Body:         n.Body,
+			State:        n.State,
+			CreatedAt:    n.CreatedAt,
+			ClosedAt:     deref(n.ClosedAt),
+			MergedAt:     deref(n.MergedAt),
+			Additions:    n.Additions,
+			Deletions:    n.Deletions,
+			ChangedFiles: n.ChangedFiles,
+			BaseRefOid:   n.BaseRefOid,
+			HeadRefOid:   n.HeadRefOid,
+			Author: model.Author{
+				Login: n.Author.Login,
+			},
+			Comments: n.Comments.Nodes,
+			Reviews:  n.Reviews.Nodes,
+		})
+	}
+
+	return prs
 }
 
 func (c *GhClient) GetRateLimit() (*model.RateLimitResponse, error) {
@@ -95,27 +193,6 @@ func (c *GhClient) RetrieveBranchZip(repo, sha, outputPath, outputName string) e
 	return fmt.Errorf("fail with all tokens %s@%s", repo, sha)
 }
 
-func (c *GhClient) fetchPullRequests(repo string, limit int) ([]model.PullRequest, error) {
-	args := c.buildPRArgs(repo, limit)
-
-	output, err := c.runGh(args)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.decodePullRequests(output)
-}
-
-func (c *GhClient) buildPRArgs(repo string, limit int) []string {
-	return []string{
-		"pr", "list",
-		"-R", repo,
-		"--state", "all",
-		"--limit", fmt.Sprintf("%d", limit),
-		"--json", data,
-	}
-}
-
 func (c *GhClient) waitIfRateLimited() bool {
 	rl, err := c.GetRateLimit()
 	if err != nil {
@@ -141,9 +218,16 @@ func (c *GhClient) waitIfRateLimited() bool {
 
 func (c *GhClient) decodePullRequests(output []byte) ([]model.PullRequest, error) {
 	var prs []model.PullRequest
-	if err := json.Unmarshal(output, &prs); err != nil {
-		return nil, fmt.Errorf("decode pull requests JSON: %w", err)
+	decoder := json.NewDecoder(bytes.NewReader(output))
+
+	for decoder.More() {
+		var pr model.PullRequest
+		if err := decoder.Decode(&pr); err != nil {
+			return nil, fmt.Errorf("decode pull request: %w", err)
+		}
+		prs = append(prs, pr)
 	}
+
 	return prs, nil
 }
 
