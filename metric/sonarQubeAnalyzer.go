@@ -89,10 +89,9 @@ func analyzeArchive(
 
 func buildProjectKey(repoName, prID, branchType string) string {
 	repo := strings.ReplaceAll(repoName, "/", "-")
-	repo = strings.ReplaceAll(repo, "=", "-")
+	prID = strings.ReplaceAll(prID, "=", "-")
 	return fmt.Sprintf("%s-%s-%s", prID, repo, branchType)
 }
-
 func cleanupExtractedDir(archivePath string) {
 	dir := strings.TrimSuffix(archivePath, ".zip")
 	_ = os.RemoveAll(dir)
